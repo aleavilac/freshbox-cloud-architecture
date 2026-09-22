@@ -1,0 +1,178 @@
+name: FreshBox - Deploy / Destroy infraestructura
+
+# =====================================================================
+# Pipeline manual (boton "Run workflow" en la pestana Actions de GitHub).
+# NO se dispara solo con cada push - es a demanda, porque las
+# credenciales de AWS Academy son temporales y hay que refrescarlas
+# como Secrets antes de cada ejecucion.
+#
+# ANTES DE USARLO, configura en GitHub:
+#   Settings -> Secrets and variables -> Actions -> New repository secret
+#     AWS_ACCESS_KEY_ID
+#     AWS_SECRET_ACCESS_KEY
+#     AWS_SESSION_TOKEN
+#   (copialos desde AWS Academy -> AWS Details -> AWS CLI, cada vez que
+#    inicies el Lab; expiran en unas horas)
+# =====================================================================
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "Que hacer"
+        required: true
+        default: "apply"
+        type: choice
+        options:
+          - apply
+          - destroy
+
+env:
+  AWS_REGION: us-east-1
+  PROJECT_NAME: freshbox
+
+jobs:
+  terraform:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra
+
+    steps:
+      - name: Checkout del repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar credenciales AWS (temporales, desde Secrets)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Verificar credenciales (falla rapido si expiraron)
+        run: aws sts get-caller-identity
+
+      - name: Instalar Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.7.5"
+
+      - name: terraform init
+        run: terraform init -upgrade
+
+      - name: terraform apply
+        if: ${{ inputs.action == 'apply' }}
+        run: terraform apply -auto-approve
+
+      - name: Guardar outputs relevantes
+        if: ${{ inputs.action == 'apply' }}
+        id: tfout
+        run: |
+          echo "alb_dns=$(terraform output -raw alb_dns_name)" >> "$GITHUB_OUTPUT"
+          echo "asg_name=$(terraform output -raw asg_name)" >> "$GITHUB_OUTPUT"
+          echo "ecr_registry=$(aws sts get-caller-identity --query Account --output text).dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com" >> "$GITHUB_OUTPUT"
+
+      # ------------------- Build + Push de las 5 imagenes -------------------
+
+      - name: Configurar QEMU (para compilar ARM64 en runner x86_64)
+        if: ${{ inputs.action == 'apply' }}
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: Configurar Docker Buildx
+        if: ${{ inputs.action == 'apply' }}
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login a Amazon ECR
+        if: ${{ inputs.action == 'apply' }}
+        run: |
+          aws ecr get-login-password --region ${{ env.AWS_REGION }} | \
+            docker login --username AWS --password-stdin ${{ steps.tfout.outputs.ecr_registry }}
+
+      - name: Build y push - frontend
+        if: ${{ inputs.action == 'apply' }}
+        working-directory: .
+        run: |
+          docker buildx build --platform linux/arm64 \
+            -t ${{ steps.tfout.outputs.ecr_registry }}/freshbox-frontend:latest \
+            ./microservicioFrontend --push
+
+      - name: Build y push - get-products
+        if: ${{ inputs.action == 'apply' }}
+        working-directory: .
+        run: |
+          docker buildx build --platform linux/arm64 \
+            -t ${{ steps.tfout.outputs.ecr_registry }}/freshbox-get-products:latest \
+            ./microserviciosBackend/get-products --push
+
+      - name: Build y push - create-product
+        if: ${{ inputs.action == 'apply' }}
+        working-directory: .
+        run: |
+          docker buildx build --platform linux/arm64 \
+            -t ${{ steps.tfout.outputs.ecr_registry }}/freshbox-create-product:latest \
+            ./microserviciosBackend/create-product --push
+
+      - name: Build y push - update-product
+        if: ${{ inputs.action == 'apply' }}
+        working-directory: .
+        run: |
+          docker buildx build --platform linux/arm64 \
+            -t ${{ steps.tfout.outputs.ecr_registry }}/freshbox-update-product:latest \
+            ./microserviciosBackend/update-product --push
+
+      - name: Build y push - delete-product
+        if: ${{ inputs.action == 'apply' }}
+        working-directory: .
+        run: |
+          docker buildx build --platform linux/arm64 \
+            -t ${{ steps.tfout.outputs.ecr_registry }}/freshbox-delete-product:latest \
+            ./microserviciosBackend/delete-product --push
+
+      # --------- Refrescar instancias del ASG (StartInstanceRefresh esta ---------
+      # --------- bloqueado por politica de AWS Academy; se hace a mano  ---------
+      - name: Terminar instancias actuales del ASG (fuerza relanzamiento con las imagenes nuevas)
+        if: ${{ inputs.action == 'apply' }}
+        run: |
+          IDS=$(aws autoscaling describe-auto-scaling-groups \
+            --auto-scaling-group-names "${{ steps.tfout.outputs.asg_name }}" \
+            --query "AutoScalingGroups[0].Instances[].InstanceId" --output text)
+          if [ -n "$IDS" ]; then
+            echo "Terminando instancias: $IDS"
+            aws ec2 terminate-instances --instance-ids $IDS
+          else
+            echo "No habia instancias previas que terminar."
+          fi
+
+      - name: Esperar a que el ASG relance instancias sanas (hasta 10 minutos)
+        if: ${{ inputs.action == 'apply' }}
+        run: |
+          ASG="${{ steps.tfout.outputs.asg_name }}"
+          for i in $(seq 1 30); do
+            HEALTHY=$(aws autoscaling describe-auto-scaling-groups \
+              --auto-scaling-group-names "$ASG" \
+              --query "length(AutoScalingGroups[0].Instances[?HealthStatus=='Healthy' && LifecycleState=='InService'])" \
+              --output text)
+            echo "Intento $i/30 - instancias healthy: $HEALTHY"
+            if [ "$HEALTHY" -ge 2 ]; then
+              echo "OK: al menos 2 instancias healthy."
+              break
+            fi
+            sleep 20
+          done
+
+      - name: Probar el endpoint del ALB
+        if: ${{ inputs.action == 'apply' }}
+        run: |
+          ALB="${{ steps.tfout.outputs.alb_dns }}"
+          echo "Probando http://$ALB/ ..."
+          curl -sf -o /dev/null -w "HTTP %{http_code}\n" "http://$ALB/" || echo "AVISO: el frontend aun no responde 200, puede necesitar mas tiempo."
+          echo "URL del frontend: http://$ALB/"
+
+      # ------------------------------- Destroy -------------------------------
+
+      - name: terraform destroy
+        if: ${{ inputs.action == 'destroy' }}
+        run: terraform destroy -auto-approve
