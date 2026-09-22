@@ -1,0 +1,37 @@
+﻿# ============ Terraform ============
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc
+
+# Variables con datos sensibles: NUNCA subir el .tfvars real
+*.tfvars
+*.tfvars.json
+!terraform.tfvars.example
+
+# ============ AWS ============
+.aws/
+*.pem
+
+# ============ Node.js (microservicios) ============
+node_modules/
+npm-debug.log
+.env
+.env.local
+
+# ============ Sistema / editor ============
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# ============ Logs ============
+*.log

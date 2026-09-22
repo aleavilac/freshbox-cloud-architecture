@@ -1,0 +1,16 @@
+# Copia este archivo como terraform.tfvars y ajusta los valores.
+# terraform.tfvars NUNCA debe subirse al repo (ya esta en .gitignore).
+
+project_name = "freshbox"
+aws_region   = "us-east-1"
+
+db_name          = "freshbox"
+db_user          = "alumno"
+db_password      = "alumno123"
+db_root_password = "root123"
+
+asg_min_size         = 2
+asg_max_size         = 4
+asg_desired_capacity = 2
+
+single_nat_gateway = true
