@@ -35,7 +35,7 @@ resource "aws_instance" "primary" {
 
   # Cifrado EBS obligatorio segun guia del docente
   root_block_device {
-    volume_size = 16
+    volume_size = 30
     volume_type = "gp3"
     encrypted   = true
   }

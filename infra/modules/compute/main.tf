@@ -53,7 +53,7 @@ resource "aws_launch_template" "app" {
   block_device_mappings {
     device_name = "/dev/xvda"
     ebs {
-      volume_size = 16
+      volume_size = 30
       volume_type = "gp3"
       encrypted   = true
     }
@@ -119,4 +119,3 @@ resource "aws_autoscaling_policy" "scale_up" {
     target_value = 60.0
   }
 }
-
