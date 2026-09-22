@@ -4,9 +4,9 @@ variable "project_name" {
 }
 
 variable "vpc_cidr" {
-  description = "CIDR de la VPC. Diseño de clase: 10.0.0.0/22."
+  description = "CIDR de la VPC. /21 = 8 bloques /24 (necesitamos 6: 2 publicas + 2 App + 2 Data). Un /22 solo alcanza para 4 subredes /24 y no es suficiente para este diseño."
   type        = string
-  default     = "10.0.0.0/22"
+  default     = "10.0.0.0/21"
 }
 
 variable "azs" {

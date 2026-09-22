@@ -16,6 +16,9 @@ resource "aws_lb" "this" {
   subnets            = var.public_subnet_ids
 
   tags = { Name = "${var.project_name}-alb" }
+  lifecycle {
+    create_before_destroy = true
+  }
 }
 
 resource "aws_lb_target_group" "app" {
@@ -34,6 +37,9 @@ resource "aws_lb_target_group" "app" {
   }
 
   tags = { Name = "${var.project_name}-tg-app" }
+  lifecycle {
+    create_before_destroy = true
+  }
 }
 
 # Escucha HTTP:80 y reenvia TODO al target group unico.

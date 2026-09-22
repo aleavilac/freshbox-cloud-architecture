@@ -9,3 +9,7 @@ output "sg_app_id" {
 output "sg_data_id" {
   value = aws_security_group.data.id
 }
+
+output "sg_eic_id" {
+  value = aws_security_group.eic.id
+}

@@ -89,7 +89,7 @@ resource "aws_autoscaling_group" "app" {
   vpc_zone_identifier        = var.app_subnet_ids
   target_group_arns          = var.target_group_arns
   health_check_type          = "ELB"
-  health_check_grace_period  = 120
+  health_check_grace_period  = 420
 
   launch_template {
     id      = aws_launch_template.app.id
@@ -119,3 +119,4 @@ resource "aws_autoscaling_policy" "scale_up" {
     target_value = 60.0
   }
 }
+

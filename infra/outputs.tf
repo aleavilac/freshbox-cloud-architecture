@@ -19,3 +19,9 @@ output "mysql_private_ip" {
 output "asg_name" {
   value = module.compute.asg_name
 }
+
+output "eic_endpoint_id" {
+  description = "ID del EC2 Instance Connect Endpoint (para conectarte via consola: EC2 -> Instances -> Connect -> EC2 Instance Connect Endpoint)"
+  value       = aws_ec2_instance_connect_endpoint.this.id
+}
+

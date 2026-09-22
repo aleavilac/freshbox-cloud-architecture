@@ -24,6 +24,16 @@ module "security" {
   vpc_id       = module.network.vpc_id
 }
 
+# EC2 Instance Connect Endpoint: forma de conectarse por SSH a las
+# instancias privadas SIN necesitar SSM (no disponible en esta cuenta
+# Academy) y SIN IP publica ni bastion host.
+resource "aws_ec2_instance_connect_endpoint" "this" {
+  subnet_id         = module.network.app_subnet_ids[0]
+  security_group_ids = [module.security.sg_eic_id]
+
+  tags = { Name = "${var.project_name}-eic-endpoint" }
+}
+
 module "ecr" {
   source       = "./modules/ecr"
   project_name = var.project_name
@@ -48,6 +58,10 @@ module "database" {
   db_password       = var.db_password
   db_root_password  = var.db_root_password
   init_sql_content  = local.init_sql_content
+
+  # Espera a que la VPC completa (incluidas las rutas hacia el NAT Gateway)
+  # este lista antes de lanzar la EC2 de MySQL, no solo a que existan las subredes.
+  depends_on = [module.network]
 }
 
 # Capa App: Auto Scaling Group (min:2/max:4), segun exige la pauta de evaluacion.
@@ -67,5 +81,5 @@ module "compute" {
   asg_max_size         = var.asg_max_size
   asg_desired_capacity = var.asg_desired_capacity
 
-  depends_on = [module.database]
+  depends_on = [module.database, module.network]
 }
