@@ -10,7 +10,7 @@ exec > >(tee /var/log/user-data.log) 2>&1
 set -x
 
 yum update -y
-yum install -y docker telnet mysql
+yum install -y docker telnet
 systemctl enable docker
 systemctl start docker
 usermod -aG docker ec2-user
@@ -71,7 +71,8 @@ docker ps
 #   aws ssm get-parameter --name "/freshbox/diag/<instance-id>" --query Parameter.Value --output text
 # =====================================================================
 sleep 10
-IID=$(curl -s http://169.254.169.254/latest/meta-data/instance-id)
+TOKEN=$(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600")
+IID=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/instance-id)
 {
   echo "=== docker ps -a ==="
   docker ps -a --format '{{.Names}}: {{.Status}}'

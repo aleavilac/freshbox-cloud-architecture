@@ -71,7 +71,7 @@ module "compute" {
   aws_region           = var.aws_region
   app_subnet_ids       = module.network.app_subnet_ids
   sg_app_id            = module.security.sg_app_id
-  target_group_arns    = [module.alb.target_group_arn]
+  target_group_arns    = module.alb.target_group_arns
   ecr_registry         = local.ecr_registry
   db_host              = module.database.primary_private_ip
   db_name              = var.db_name

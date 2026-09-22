@@ -1,11 +1,15 @@
 # =====================================================================
-# MODULO: alb
-# ALB unico desplegado en las 2 subredes publicas (Multi-AZ).
-# UN SOLO Target Group (puerto 80) segun la guia oficial del docente:
-# el frontend (nginx) actua como reverse proxy interno hacia los 4
-# backends (get/create/update/delete-product) usando el nombre de
-# contenedor dentro de la red Docker "freshbox-net". El ALB nunca
-# habla directo con los puertos 3001-3004: todo pasa por nginx:80.
+# MODULO: alb — VERSION "5 PUERTOS" (Plan B)
+# En vez de que nginx haga de reverse proxy interno, el ALB expone
+# 5 listeners (80, 3001, 3002, 3003, 3004), cada uno con su propio
+# Target Group apuntando DIRECTO al contenedor correspondiente.
+#
+# VENTAJA: elimina el riesgo de que nginx no resuelva el nombre del
+# contenedor backend (el bug que nos costo horas).
+# REQUISITO: el frontend (app.js) debe llamar a estos puertos
+# DIRECTAMENTE (ej: http://<alb-dns>:3001/api/products), no a rutas
+# relativas como fetch('/api/products'). Verificar antes de usar esta
+# version.
 # =====================================================================
 
 resource "aws_lb" "this" {
@@ -16,44 +20,67 @@ resource "aws_lb" "this" {
   subnets            = var.public_subnet_ids
 
   tags = { Name = "${var.project_name}-alb" }
-  lifecycle {
-    create_before_destroy = true
+}
+
+locals {
+  services = {
+    frontend = {
+      port    = 80
+      path    = "/"
+      matcher = "200"
+    }
+    get-products = {
+      port    = 3001
+      path    = "/health"
+      matcher = "200"
+    }
+    create-product = {
+      port    = 3002
+      path    = "/health"
+      matcher = "200"
+    }
+    update-product = {
+      port    = 3003
+      path    = "/health"
+      matcher = "200"
+    }
+    delete-product = {
+      port    = 3004
+      path    = "/health"
+      matcher = "200"
+    }
   }
 }
 
-resource "aws_lb_target_group" "app" {
-  name     = "${var.project_name}-tg-app"
-  port     = 80
+resource "aws_lb_target_group" "this" {
+  for_each = local.services
+
+  name     = "${var.project_name}-tg-${each.key}"
+  port     = each.value.port
   protocol = "HTTP"
   vpc_id   = var.vpc_id
 
   health_check {
-    path                = "/"
+    path                = each.value.path
     healthy_threshold   = 2
     unhealthy_threshold = 3
     interval            = 15
     timeout             = 5
-    matcher             = "200"
+    matcher             = each.value.matcher
   }
 
-  tags = { Name = "${var.project_name}-tg-app" }
-  lifecycle {
-    create_before_destroy = true
-  }
+  tags = { Name = "${var.project_name}-tg-${each.key}" }
 }
 
-# Escucha HTTP:80 y reenvia TODO al target group unico.
-# nginx (dentro del contenedor frontend) resuelve internamente:
-#   /             -> archivos estaticos del frontend
-#   /api/products -> proxy_pass hacia freshbox-get-products:3001 (GET),
-#                     freshbox-create-product:3002 (POST), etc.
-resource "aws_lb_listener" "http" {
+resource "aws_lb_listener" "this" {
+  for_each = local.services
+
   load_balancer_arn = aws_lb.this.arn
-  port               = 80
+  port               = each.value.port
   protocol           = "HTTP"
 
   default_action {
     type             = "forward"
-    target_group_arn = aws_lb_target_group.app.arn
+    target_group_arn = aws_lb_target_group.this[each.key].arn
   }
 }

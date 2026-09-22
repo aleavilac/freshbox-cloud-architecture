@@ -1,21 +1,17 @@
 # =====================================================================
-# MODULO: security
-# 3 Security Groups encadenados (principio de minimo privilegio):
-#   SG-ALB  <- Internet (80/443)
-#   SG-APP  <- SG-ALB   (80)   [nginx expone TODO en el puerto 80;
-#                                los backends 3001-3004 solo se hablan
-#                                entre contenedores via red Docker interna,
-#                                nunca necesitan quedar abiertos a nivel SG]
-#   SG-DATA <- SG-APP   (3306)
+# MODULO: security — VERSION "5 PUERTOS" (Plan B)
+# SG-ALB y SG-APP ahora abren tambien 3001-3004, porque el ALB
+# habla directo con cada contenedor backend (ya no todo pasa por
+# nginx en el puerto 80).
 # =====================================================================
 
 resource "aws_security_group" "alb" {
   name        = "${var.project_name}-sg-alb"
-  description = "SG-ALB: permite 80/443 desde Internet"
+  description = "SG-ALB: permite 80/443 y 3001-3004 desde Internet (patron 5 puertos)"
   vpc_id      = var.vpc_id
 
   ingress {
-    description = "HTTP desde Internet"
+    description = "HTTP desde Internet (frontend)"
     from_port   = 80
     to_port     = 80
     protocol    = "tcp"
@@ -26,6 +22,14 @@ resource "aws_security_group" "alb" {
     description = "HTTPS desde Internet"
     from_port   = 443
     to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  ingress {
+    description = "APIs backend (get/create/update/delete-product) desde Internet"
+    from_port   = 3001
+    to_port     = 3004
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
@@ -42,13 +46,21 @@ resource "aws_security_group" "alb" {
 
 resource "aws_security_group" "app" {
   name        = "${var.project_name}-sg-app"
-  description = "SG-APP: permite trafico HTTP (puerto 80, nginx) solo desde SG-ALB"
+  description = "SG-APP: permite 80 y 3001-3004 SOLO desde SG-ALB"
   vpc_id      = var.vpc_id
 
   ingress {
-    description     = "Frontend (nginx, reverse proxy interno) desde ALB"
+    description     = "Frontend desde ALB"
     from_port       = 80
     to_port         = 80
+    protocol        = "tcp"
+    security_groups = [aws_security_group.alb.id]
+  }
+
+  ingress {
+    description     = "APIs backend desde ALB"
+    from_port       = 3001
+    to_port         = 3004
     protocol        = "tcp"
     security_groups = [aws_security_group.alb.id]
   }
@@ -86,13 +98,7 @@ resource "aws_security_group" "data" {
   tags = { Name = "${var.project_name}-sg-data" }
 }
 
-# =====================================================================
-# EC2 Instance Connect Endpoint (SSM no esta disponible en esta cuenta
-# Academy - "Systems Manager default role not enabled"). Este es el
-# metodo alternativo para conectarse por SSH a instancias en subredes
-# PRIVADAS, sin IP publica, sin bastion, desde el navegador o AWS CLI.
-# =====================================================================
-
+# EC2 Instance Connect Endpoint (igual que en el Plan A, sin cambios)
 resource "aws_security_group" "eic" {
   name        = "${var.project_name}-sg-eic"
   description = "SG del EC2 Instance Connect Endpoint"
@@ -108,8 +114,6 @@ resource "aws_security_group" "eic" {
   tags = { Name = "${var.project_name}-sg-eic" }
 }
 
-# Permite que el trafico SSH que sale del Instance Connect Endpoint
-# llegue a las instancias de la capa App (agregado a SG-APP)
 resource "aws_security_group_rule" "app_ssh_from_eic" {
   type                     = "ingress"
   from_port                = 22
@@ -117,10 +121,9 @@ resource "aws_security_group_rule" "app_ssh_from_eic" {
   protocol                 = "tcp"
   security_group_id        = aws_security_group.app.id
   source_security_group_id = aws_security_group.eic.id
-  description               = "SSH desde EC2 Instance Connect Endpoint (debug, sin SSM)"
+  description               = "SSH desde EC2 Instance Connect Endpoint (debug)"
 }
 
-# Igual para la capa Data (por si se necesita entrar a revisar MySQL directamente)
 resource "aws_security_group_rule" "data_ssh_from_eic" {
   type                     = "ingress"
   from_port                = 22
@@ -128,5 +131,5 @@ resource "aws_security_group_rule" "data_ssh_from_eic" {
   protocol                 = "tcp"
   security_group_id        = aws_security_group.data.id
   source_security_group_id = aws_security_group.eic.id
-  description               = "SSH desde EC2 Instance Connect Endpoint (debug, sin SSM)"
+  description               = "SSH desde EC2 Instance Connect Endpoint (debug)"
 }
